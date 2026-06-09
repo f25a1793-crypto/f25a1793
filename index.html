@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Integration Calculator</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.8.0/math.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            display: flex;
+            height: 100vh;
+            background-color: #f5f5f7;
+            overflow: hidden;
+        }
+
+        /* Sidebar Control Panel */
+        #sidebar {
+            width: 380px;
+            background-color: #ffffff;
+            box-shadow: 2px 0 10px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            padding: 25px;
+            z-index: 10;
+        }
+
+        h2 {
+            color: #333;
+            margin-bottom: 20px;
+            font-weight: 600;
+            font-size: 1.4rem;
+            border-bottom: 2px solid #3182ce;
+            padding-bottom: 8px;
+        }
+
+        .input-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 6px;
+            color: #4a5568;
+            font-weight: 500;
+            font-size: 0.9rem;
+        }
+
+        input {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #cbd5e0;
+            border-radius: 6px;
+            font-size: 1rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        input:focus {
+            border-color: #3182ce;
+            box-shadow: 0 0 0 3px rgba(49, 130, 206, 0.2);
+        }
+
+        .bounds-row {
+            display: flex;
+            gap: 15px;
+        }
+
+        .bounds-row .input-group {
+            flex: 1;
+        }
+
+        /* Result Display Box */
+        #result-box {
+            margin-top: auto;
+            background-color: #ebf8ff;
+            border: 1px solid #bee3f8;
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+        }
+
+        #result-label {
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #2b6cb0;
+            margin-bottom: 5px;
+        }
+
+        #result-value {
+            font-size: 1.8rem;
+            font-weight: bold;
+            color: #2b6cb0;
+            word-break: break-all;
+        }
+
+        .error-message {
+            color: #e53e3e;
+            font-size: 0.9rem;
+            margin-top: 5px;
+            display: none;
+        }
+
+        /* Graph Display Container */
+        #graph-container {
+            flex: 1;
+            position: relative;
+            padding: 20px;
+            background-color: #fafafa;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        canvas {
+            width: 100% !important;
+            height: 100% !important;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="sidebar">
+        <h2>Integration Calculator</h2>
+        
+        <div class="input-group">
+            <label for="function-input">Function f(x)</label>
+            <input type="text" id="function-input" value="x^2 - 2x + 1" placeholder="e.g., sin(x), x^2, exp(x)">
+            <div id="error-fx" class="error-message">Invalid mathematical expression</div>
+        </div>
+
+        <div class="bounds-row">
+            <div class="input-group">
+                <label for="lower-bound">Lower Bound (a)</label>
+                <input type="number" id="lower-bound" value="0" step="any">
+            </div>
+            <div class="input-group">
+                <label for="upper-bound">Upper Bound (b)</label>
+                <input type="number" id="upper-bound" value="3" step="any">
+            </div>
+        </div>
+        <div id="error-bounds" class="error-message" style="margin-top:-15px; margin-bottom:15px;">Lower bound must be less than upper bound</div>
+
+        <div id="result-box">
+            <div id="result-label">∫ f(x) dx</div>
+            <div id="result-value">0.00</div>
+        </div>
+    </div>
+
+    <div id="graph-container">
+        <canvas id="mathChart"></canvas>
+    </div>
+
+    <script>
+        // Get DOM Elements
+        const fxInput = document.getElementById('function-input');
+        const aInput = document.getElementById('lower-bound');
+        const bInput = document.getElementById('upper-bound');
+        const resultValue = document.getElementById('result-value');
+        const errorFx = document.getElementById('error-fx');
+        const errorBounds = document.getElementById('error-bounds');
+        const ctx = document.getElementById('mathChart').getContext('2d');
+
+        let chart;
+
+        // Numerical Integration using Simpson's Rule
+        function integrate(f, a, b, n = 1000) {
+            if (n % 2 !== 0) n++; // Simpson's rule requires an even number of intervals
+            const h = (b - a) / n;
+            let sum = f(a) + f(b);
+
+            for (let i = 1; i < n; i++) {
+                const x = a + i * h;
+                sum += i % 2 === 0 ? 2 * f(x) : 4 * f(x);
+            }
+            return (h / 3) * sum;
+        }
+
+        // Main Calculation and Plot function
+        function calculateAndPlot() {
+            const exprString = fxInput.value;
+            const a = parseFloat(aInput.value);
+            const b = parseFloat(bInput.value);
+
+            // Validation flags
+            let valid = true;
+            errorFx.style.display = 'none';
+            errorBounds.style.display = 'none';
+
+            if (isNaN(a) || !isFinite(a) || isNaN(b) || !isFinite(b) || a >= b) {
+                errorBounds.style.display = 'block';
+                valid = false;
+            }
+
+            let compiledExpr;
+            try {
+                compiledExpr = math.compile(exprString);
+                // Test evaluation to catch syntax issues early
+                compiledExpr.evaluate({x: 1});
+            } catch (e) {
+                errorFx.style.display = 'block';
+                valid = false;
+            }
+
+            if (!valid) {
+                resultValue.textContent = "—";
+                return;
+            }
+
+            // Wrapper function to safely evaluate mathematical syntax via math.js
+            const f = (xVal) => {
+                try {
+                    return compiledExpr.evaluate({x: xVal});
+                } catch(e) {
+                    return 0;
+                }
+            };
+
+            // Calculate Definite Integral Result
+            const integralResult = integrate(f, a, b);
+            resultValue.textContent = Number(integralResult.toFixed(5)).toLocaleString();
+
+            // Generate graph visualization boundaries dynamic to bounds
+            const padding = (b - a) * 0.5 || 2; // pad the window view past bounds
+            const graphMinX = a - padding;
+            const graphMaxX = b + padding;
+            const steps = 200;
+            const stepSize = (graphMaxX - graphMinX) / steps;
+
+            const lineData = [];
+            const integralAreaData = [];
+
+            for (let i = 0; i <= steps; i++) {
+                const currentX = graphMinX + i * stepSize;
+                const currentY = f(currentX);
+
+                if (typeof currentY === 'number' && isFinite(currentY)) {
+                    lineData.push({x: currentX, y: currentY});
+                    
+                    // Populate area dataset if current X resides within lower/upper bounds
+                    if (currentX >= a && currentX <= b) {
+                        integralAreaData.push({x: currentX, y: currentY});
+                    }
+                }
+            }
+
+            // Ensure exact edges of boundary points are tracked in shaded area
+            integralAreaData.unshift({x: a, y: f(a)});
+            integralAreaData.push({x: b, y: f(b)});
+
+            // Destroy older instance of Chart to render fresh data adjustments cleanly
+            if (chart) {
+                chart.destroy();
+            }
+
+            // Render Graphic Layout via Chart.js
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    datasets: [
+                        {
+                            label: `f(x) = ${exprString}`,
+                            data: lineData,
+                            borderColor: '#3182ce',
+                            borderWidth: 3,
+                            pointRadius: 0,
+                            fill: false,
+                            tension: 0.1,
+                            z: 2
+                        },
+                        {
+                            label: 'Integrated Area',
+                            data: integralAreaData,
+                            backgroundColor: 'rgba(49, 130, 206, 0.25)',
+                            borderColor: 'transparent',
+                            pointRadius: 0,
+                            fill: 'origin', // Shaded down to the x-axis
+                            z: 1
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        x: {
+                            type: 'linear',
+                            position: 'bottom',
+                            title: { display: true, text: 'X' },
+                            grid: { color: 'rgba(0, 0, 0, 0.05)' }
+                        },
+                        y: {
+                            type: 'linear',
+                            title: { display: true, text: 'Y' },
+                            grid: { color: 'rgba(0, 0, 0, 0.05)' }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Attach Real-time listener environments
+        fxInput.addEventListener('input', calculateAndPlot);
+        aInput.addEventListener('input', calculateAndPlot);
+        bInput.addEventListener('input', calculateAndPlot);
+
+        // Run Calculation standard trigger on launch load
+        calculateAndPlot();
+    </script>
+</body>
+</html>
